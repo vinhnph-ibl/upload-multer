@@ -5,42 +5,48 @@ import path from 'path'
 import fs from 'fs'
 import readChunk from 'read-chunk'
 import fileType from 'file-type'
+import sharp from 'sharp'
+import crypto from 'crypto'
 
 const app = express()
 const UPLOAD_PATH = path.join(__dirname, 'uploads')
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, UPLOAD_PATH)
-  }
-})
+const storage = multer.memoryStorage()
 
 const upload = multer({ 
-  storage,
-  fileFilter: function(req, file, cb) {
-
-    // The function should call `cb` with a boolean
-    // to indicate if the file should be accepted
-  
-    // To reject this file pass `false`, like so:
-
-    // req.fileValidationError = "Forbidden extension";
-    // return cb(null, false, req.fileValidationError)
-  
-    // To accept the file pass `true`, like so:
-    // cb(null, true)
-  
-  }
+  storage
 })
 
-app.post('/upload', upload.single('file'), function(req, res){
+app.post('/upload', upload.single('file'), async function(req, res){
   // req.file is the `avatar` file
   // req.body will hold the text fields, if there were any
-  if (req.fileValidationError) {
-    return res.status(400).send({error: req.fileValidationError})
+
+  if(!req.file){
+    return res.status(400).send({status: 'error', error: 'Invalid file'})
   }
+  const image = sharp(req.file.buffer)
+  try {
+    const { format, width, height } = await image.metadata()
+    const validExtensions = ['png', 'jpeg', 'gif']
+    if(!validExtensions.includes(format)){
+      return res.status(400).send({status: 'error', error: 'Invalid file extension'})
+    }
+    if(width > 512 || height > 512){
+      return res.status(400).send({status: 'error', error: 'Width / Height is too high definition'})
+    }
+  } catch (error) {
+    return res.status(400).send({status: 'error', error: 'Invalid file'})
+  }
+
+  const raw = crypto.randomBytes(16)
+  const fileName = raw.toString('hex')
+  const filePath = path.join(UPLOAD_PATH, fileName)
+  const wstream = fs.createWriteStream(filePath)
+  wstream.write(req.file.buffer)
+  wstream.end()
+
   // Everything went fine.
-  res.status(200).send({status: 'ok', filename: req.file.filename})
+  res.status(200).send({status: 'success', fileName})
 })
 
 app.get('/image/:id', function(req, res){
